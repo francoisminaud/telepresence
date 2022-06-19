@@ -13,6 +13,7 @@ import (
 type NamespacePair interface {
 	Harness
 	ApplyApp(ctx context.Context, name, workload string)
+	ApplyTestApp(ctx context.Context, name, workload string)
 	ApplyEchoService(ctx context.Context, name string, port int)
 	AppNamespace() string
 	DeleteSvcAndWorkload(ctx context.Context, workload, name string)
@@ -90,6 +91,11 @@ func (s *nsPair) ApplyEchoService(ctx context.Context, name string, port int) {
 func (s *nsPair) ApplyApp(ctx context.Context, name, workload string) {
 	getT(ctx).Helper()
 	ApplyApp(ctx, name, s.namespace, workload)
+}
+
+func (s *nsPair) ApplyTestApp(ctx context.Context, name, workload string) {
+	getT(ctx).Helper()
+	ApplyTestApp(ctx, name, s.namespace, workload)
 }
 
 func (s *nsPair) RolloutStatusWait(ctx context.Context, workload string) error {

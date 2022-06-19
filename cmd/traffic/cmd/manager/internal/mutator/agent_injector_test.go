@@ -123,6 +123,22 @@ func TestTrafficAgentConfigGenerator(t *testing.T) {
 		},
 	}
 
+	podUnnamedNumericPort := core.Pod{
+		ObjectMeta: podObjectMeta("unnamed-numeric-port", "app"),
+		Spec: core.PodSpec{
+			Containers: []core.Container{
+				{
+					Name: "some-container",
+					Ports: []core.ContainerPort{
+						{
+							ContainerPort: 8899,
+						},
+					},
+				},
+			},
+		},
+	}
+
 	podNamedAndNumericPort := core.Pod{
 		ObjectMeta: meta.ObjectMeta{
 			Name:            podName("named-and-numeric"),
@@ -255,6 +271,7 @@ func TestTrafficAgentConfigGenerator(t *testing.T) {
 	}
 	namedPortUID := makeUID()
 	numericPortUID := makeUID()
+	unnamedNumericPortUID := makeUID()
 	multiPortUID := makeUID()
 
 	clientset := fake.NewSimpleClientset(
@@ -308,6 +325,27 @@ func TestTrafficAgentConfigGenerator(t *testing.T) {
 				APIVersion: "v1",
 			},
 			ObjectMeta: meta.ObjectMeta{
+				Name:      "unnamed-numeric-port",
+				Namespace: "some-ns",
+				UID:       unnamedNumericPortUID,
+			},
+			Spec: core.ServiceSpec{
+				Ports: []core.ServicePort{{
+					Protocol:   "TCP",
+					Port:       80,
+					TargetPort: intstr.FromInt(8899),
+				}},
+				Selector: map[string]string{
+					"app": "unnamed-numeric-port",
+				},
+			},
+		},
+		&core.Service{
+			TypeMeta: meta.TypeMeta{
+				Kind:       "Service",
+				APIVersion: "v1",
+			},
+			ObjectMeta: meta.ObjectMeta{
 				Name:      "multi-port",
 				Namespace: "some-ns",
 				UID:       multiPortUID,
@@ -339,6 +377,7 @@ func TestTrafficAgentConfigGenerator(t *testing.T) {
 		&podMultiSplitPort,
 		deployment(&podNamedPort),
 		deployment(&podNumericPort),
+		deployment(&podUnnamedNumericPort),
 		deployment(&podNamedAndNumericPort),
 		deployment(&podMultiPort),
 		deployment(&podMultiSplitPort),
@@ -399,7 +438,7 @@ func TestTrafficAgentConfigGenerator(t *testing.T) {
 								ServiceUID:        namedPortUID,
 								ServicePortName:   "http",
 								ServicePort:       80,
-								Protocol:          "TCP",
+								Protocol:          core.ProtocolTCP,
 								AgentPort:         9900,
 								ContainerPort:     8888,
 							},
@@ -434,7 +473,40 @@ func TestTrafficAgentConfigGenerator(t *testing.T) {
 								ServicePortName:   "http",
 								ServicePort:       80,
 								TargetPortNumeric: true,
-								Protocol:          "TCP",
+								Protocol:          core.ProtocolTCP,
+								AgentPort:         9900,
+								ContainerPort:     8899,
+							},
+						},
+						EnvPrefix:  "A_",
+						MountPoint: "/tel_app_mounts/some-container",
+					},
+				},
+			},
+			"",
+		},
+		{
+			"Unnamed Numeric port",
+			&podUnnamedNumericPort,
+			&agentconfig.Sidecar{
+				AgentName:    "unnamed-numeric-port",
+				AgentImage:   "docker.io/datawire/tel2:2.6.0",
+				Namespace:    "some-ns",
+				WorkloadName: "unnamed-numeric-port",
+				WorkloadKind: "Deployment",
+				ManagerHost:  "traffic-manager.default",
+				ManagerPort:  8081,
+				Containers: []*agentconfig.Container{
+					{
+						Name: "some-container",
+						Intercepts: []*agentconfig.Intercept{
+							{
+								ContainerPortName: "",
+								ServiceName:       "unnamed-numeric-port",
+								ServiceUID:        unnamedNumericPortUID,
+								ServicePort:       80,
+								TargetPortNumeric: true,
+								Protocol:          core.ProtocolTCP,
 								AgentPort:         9900,
 								ContainerPort:     8899,
 							},
@@ -467,7 +539,7 @@ func TestTrafficAgentConfigGenerator(t *testing.T) {
 								ServiceUID:        namedPortUID,
 								ServicePortName:   "http",
 								ServicePort:       80,
-								Protocol:          "TCP",
+								Protocol:          core.ProtocolTCP,
 								AgentPort:         9900,
 								ContainerPort:     8888,
 							},
@@ -486,7 +558,7 @@ func TestTrafficAgentConfigGenerator(t *testing.T) {
 								ServicePortName:   "http",
 								ServicePort:       80,
 								TargetPortNumeric: true,
-								Protocol:          "TCP",
+								Protocol:          core.ProtocolTCP,
 								AgentPort:         9901,
 								ContainerPort:     8899,
 							},
@@ -519,7 +591,7 @@ func TestTrafficAgentConfigGenerator(t *testing.T) {
 								ServiceUID:        multiPortUID,
 								ServicePortName:   "http",
 								ServicePort:       80,
-								Protocol:          "TCP",
+								Protocol:          core.ProtocolTCP,
 								AgentPort:         9900,
 								ContainerPort:     8080,
 							},
@@ -529,7 +601,7 @@ func TestTrafficAgentConfigGenerator(t *testing.T) {
 								ServiceUID:        multiPortUID,
 								ServicePortName:   "grpc",
 								ServicePort:       8001,
-								Protocol:          "TCP",
+								Protocol:          core.ProtocolTCP,
 								AppProtocol:       "grpc",
 								AgentPort:         9901,
 								ContainerPort:     8081,
@@ -564,7 +636,7 @@ func TestTrafficAgentConfigGenerator(t *testing.T) {
 								ServiceUID:        multiPortUID,
 								ServicePortName:   "http",
 								ServicePort:       80,
-								Protocol:          "TCP",
+								Protocol:          core.ProtocolTCP,
 								AgentPort:         9900,
 								ContainerPort:     8080,
 							},
@@ -582,7 +654,7 @@ func TestTrafficAgentConfigGenerator(t *testing.T) {
 								ServiceUID:        multiPortUID,
 								ServicePortName:   "grpc",
 								ServicePort:       8001,
-								Protocol:          "TCP",
+								Protocol:          core.ProtocolTCP,
 								AppProtocol:       "grpc",
 								AgentPort:         9901,
 								ContainerPort:     8081,

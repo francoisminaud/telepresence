@@ -30,11 +30,9 @@ const (
 
 // The dialer takes care of dispatching messages between gRPC and UDP connections
 type dialer struct {
+	TimedHandler
 	stream    Stream
 	conn      net.Conn
-	idleTimer *time.Timer
-	idleLock  sync.Mutex
-	ttl       int64
 	connected int32
 	done      chan struct{}
 }
@@ -58,11 +56,11 @@ func NewConnEndpoint(stream Stream, conn net.Conn) Endpoint {
 		state = connecting
 	}
 	return &dialer{
-		stream:    stream,
-		conn:      conn,
-		connected: state,
-		ttl:       int64(ttl),
-		done:      make(chan struct{}),
+		TimedHandler: NewTimedHandler(stream.ID(), ttl, nil),
+		stream:       stream,
+		conn:         conn,
+		connected:    state,
+		done:         make(chan struct{}),
 	}
 }
 
@@ -102,7 +100,7 @@ func (h *dialer) Start(ctx context.Context) {
 		}
 
 		// Set up the idle timer to close and release this endpoint when it's been idle for a while.
-		h.idleTimer = time.NewTimer(h.getTTL())
+		h.TimedHandler.Start(ctx)
 		h.connected = connected
 
 		wg := sync.WaitGroup{}
@@ -110,7 +108,7 @@ func (h *dialer) Start(ctx context.Context) {
 		go h.connToStreamLoop(ctx, &wg)
 		go h.streamToConnLoop(ctx, &wg)
 		wg.Wait()
-		h.Close(ctx)
+		h.Stop(ctx)
 	}()
 }
 
@@ -118,16 +116,12 @@ func (h *dialer) Done() <-chan struct{} {
 	return h.done
 }
 
-func (h *dialer) getTTL() time.Duration {
-	return time.Duration(atomic.LoadInt64(&h.ttl))
-}
-
 func (h *dialer) handleControl(ctx context.Context, cm Message) {
 	switch cm.Code() {
 	case Disconnect: // Peer responded to our disconnect or wants to hard-close. No more messages will arrive
-		h.Close(ctx)
+		h.Stop(ctx)
 	case KeepAlive:
-		h.resetIdle()
+		h.ResetIdle()
 	case DialOK:
 		// So how can a dialer get a DialOK from a peer? Surely, there cannot be a dialer at both ends?
 		// Well, the story goes like this:
@@ -141,8 +135,8 @@ func (h *dialer) handleControl(ctx context.Context, cm Message) {
 	}
 }
 
-// Close will close the underlying TCP/UDP connection
-func (h *dialer) Close(ctx context.Context) {
+// Stop will close the underlying TCP/UDP connection
+func (h *dialer) Stop(ctx context.Context) {
 	if atomic.CompareAndSwapInt32(&h.connected, connected, notConnected) {
 		dlog.Debugf(ctx, "   CONN %s explicitly closing connection", h.stream.ID())
 		_ = h.conn.Close()
@@ -153,7 +147,7 @@ func (h *dialer) startDisconnect(ctx context.Context) {
 	if atomic.CompareAndSwapInt32(&h.connected, connected, disconnecting) {
 		id := h.stream.ID()
 		dlog.Debugf(ctx, "   CONN %s disconnecting", id)
-		atomic.StoreInt64(&h.ttl, int64(partlyClosedDuration))
+		h.SetTTL(partlyClosedDuration)
 		if err := h.conn.Close(); err != nil {
 			dlog.Debugf(ctx, "!! CONN %s, Close failed: %v", id, err)
 		}
@@ -162,12 +156,12 @@ func (h *dialer) startDisconnect(ctx context.Context) {
 
 func (h *dialer) connToStreamLoop(ctx context.Context, wg *sync.WaitGroup) {
 	endReason := ""
-	endLevel := dlog.LogLevelError
+	endLevel := dlog.LogLevelDebug
 	id := h.stream.ID()
 
 	outgoing := make(chan Message, 5)
 	defer func() {
-		if !h.resetIdle() {
+		if !h.ResetIdle() {
 			// Hard close of peer. We don't want any more data
 			select {
 			case outgoing <- NewMessage(Disconnect, nil):
@@ -189,12 +183,11 @@ func (h *dialer) connToStreamLoop(ctx context.Context, wg *sync.WaitGroup) {
 			switch {
 			case errors.Is(err, io.EOF):
 				endReason = "EOF was encountered"
-				endLevel = dlog.LogLevelDebug
 			case errors.Is(err, net.ErrClosed):
 				endReason = "the connection was closed"
-				endLevel = dlog.LogLevelDebug
 			default:
 				endReason = fmt.Sprintf("a read error occurred: %v", err)
+				endLevel = dlog.LogLevelError
 			}
 			h.startDisconnect(ctx)
 			return
@@ -202,7 +195,7 @@ func (h *dialer) connToStreamLoop(ctx context.Context, wg *sync.WaitGroup) {
 
 		dlog.Tracef(ctx, "<- CONN %s, len %d", id, n)
 		switch {
-		case !h.resetIdle():
+		case !h.ResetIdle():
 			endReason = "it was idle for too long"
 			return
 		case n > 0:
@@ -218,15 +211,22 @@ func (h *dialer) connToStreamLoop(ctx context.Context, wg *sync.WaitGroup) {
 
 func (h *dialer) streamToConnLoop(ctx context.Context, wg *sync.WaitGroup) {
 	endReason := ""
-	endLevel := dlog.LogLevelError
 	id := h.stream.ID()
 	defer func() {
 		wg.Done()
 		h.startDisconnect(ctx)
-		dlog.Logf(ctx, endLevel, "   CONN %s stream-to-conn loop ended because %s", id, endReason)
+		dlog.Debugf(ctx, "   CONN %s stream-to-conn loop ended because %s", id, endReason)
 	}()
 
 	incoming, errCh := ReadLoop(ctx, h.stream)
+
+	connWrite := h.conn.Write
+	if udpConn, ok := h.conn.(net.PacketConn); ok && h.conn.RemoteAddr() == nil {
+		addr := h.stream.ID().SourceAddr()
+		connWrite = func(payload []byte) (int, error) {
+			return udpConn.WriteTo(payload, addr)
+		}
+	}
 
 	dlog.Debugf(ctx, "   CONN %s stream-to-conn loop started", id)
 	for atomic.LoadInt32(&h.connected) != notConnected {
@@ -234,7 +234,7 @@ func (h *dialer) streamToConnLoop(ctx context.Context, wg *sync.WaitGroup) {
 		case <-ctx.Done():
 			endReason = ctx.Err().Error()
 			return
-		case <-h.idleTimer.C:
+		case <-h.Idle():
 			endReason = "it was idle for too long"
 			return
 		case err := <-errCh:
@@ -243,10 +243,9 @@ func (h *dialer) streamToConnLoop(ctx context.Context, wg *sync.WaitGroup) {
 			if dg == nil {
 				// h.incoming was closed by the reader and is now drained.
 				endReason = "there was no more input"
-				endLevel = dlog.LogLevelDebug
 				return
 			}
-			if !h.resetIdle() {
+			if !h.ResetIdle() {
 				endReason = "it was idle for too long"
 				return
 			}
@@ -257,7 +256,7 @@ func (h *dialer) streamToConnLoop(ctx context.Context, wg *sync.WaitGroup) {
 			payload := dg.Payload()
 			pn := len(payload)
 			for n := 0; n < pn; {
-				wn, err := h.conn.Write(payload[n:])
+				wn, err := connWrite(payload[n:])
 				if err != nil {
 					h.startDisconnect(ctx)
 					endReason = fmt.Sprintf("a write error occurred: %v", err)
@@ -268,16 +267,6 @@ func (h *dialer) streamToConnLoop(ctx context.Context, wg *sync.WaitGroup) {
 			}
 		}
 	}
-}
-
-func (h *dialer) resetIdle() bool {
-	h.idleLock.Lock()
-	stopped := h.idleTimer.Stop()
-	if stopped {
-		h.idleTimer.Reset(h.getTTL())
-	}
-	h.idleLock.Unlock()
-	return stopped
 }
 
 // DialWaitLoop reads from the given dialStream. A new goroutine that creates a Tunnel to the manager and then

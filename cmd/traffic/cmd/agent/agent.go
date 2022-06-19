@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pkg/sftp"
+	core "k8s.io/api/core/v1"
 
 	"github.com/datawire/dlib/dgroup"
 	"github.com/datawire/dlib/dlog"
@@ -104,10 +105,8 @@ func SftpServer(ctx context.Context, sftpPortCh chan<- uint16) error {
 			if err = s.Serve(); err != nil {
 				if !errors.Is(err, io.EOF) {
 					dlog.Errorf(ctx, "sftp server completed with error %v", err)
-					return
 				}
 			}
-			dlog.Errorf(ctx, "sftp server completed because client exited")
 		}()
 	}
 }
@@ -175,18 +174,25 @@ func Main(ctx context.Context, args ...string) error {
 			}
 
 			// Group the containers intercepts by agent port
-			icStates := make(map[uint16][]*agentconfig.Intercept, len(cn.Intercepts))
+			icStates := make(map[agentconfig.PortAndProto][]*agentconfig.Intercept, len(cn.Intercepts))
 			for _, ic := range cn.Intercepts {
-				icStates[ic.AgentPort] = append(icStates[ic.AgentPort], ic)
+				k := agentconfig.PortAndProto{ic.AgentPort, ic.Protocol}
+				icStates[k] = append(icStates[k], ic)
 			}
 
 			for _, ics := range icStates {
-				ic := ics[0] // They all have the same agent port and container port, so the first one will do
-				lisAddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf(":%d", ic.AgentPort))
+				ic := ics[0] // They all have the same protocol, agent port, and container port, so the first one will do
+				var lisAddr net.Addr
+				as := fmt.Sprintf(":%d", ic.AgentPort)
+				if ic.Protocol == core.ProtocolTCP {
+					lisAddr, err = net.ResolveTCPAddr("tcp", as)
+				} else {
+					lisAddr, err = net.ResolveUDPAddr("udp", as)
+				}
 				if err != nil {
 					return err
 				}
-				fwd := forwarder.NewForwarder(lisAddr, "", ic.ContainerPort)
+				fwd := forwarder.NewInterceptor(lisAddr, "127.0.0.1", ic.ContainerPort)
 				g.Go(fmt.Sprintf("forward-%s:%d", cn.Name, ic.ContainerPort), func(ctx context.Context) error {
 					return fwd.Serve(tunnel.WithPool(ctx, tunnel.NewPool()))
 				})

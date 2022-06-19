@@ -27,6 +27,12 @@ func NewConnID(proto int, src, dst net.IP, srcPort, dstPort uint16) ConnID {
 	}
 	ls := len(src)
 	ld := len(dst)
+	if ls == 0 {
+		panic("invalid source IP")
+	}
+	if ld == 0 {
+		panic("invalid destination IP")
+	}
 	bs := make([]byte, ls+ld+5)
 	copy(bs, src)
 	binary.BigEndian.PutUint16(bs[ls:], srcPort)

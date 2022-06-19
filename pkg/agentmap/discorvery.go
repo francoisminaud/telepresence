@@ -94,12 +94,23 @@ func findServicesSelecting(c context.Context, namespace string, lbs labels.Label
 //     kubectl create deploy my-deploy --image my-image
 //     kubectl expose deploy my-deploy --port 80 --target-port 8080
 func findContainerMatchingPort(port *core.ServicePort, cns []core.Container) (*core.Container, int) {
+	// The protocol of the targetPort must match the protocol of the containerPort because it is
+	// not illegal to listen with both TCP and UDP on the same port.
+	proto := core.ProtocolTCP
+	if port.Protocol != "" {
+		proto = port.Protocol
+	}
+	protoEqual := func(p core.Protocol) bool {
+		return p == proto || p == "" && proto == core.ProtocolTCP
+	}
+
 	if port.TargetPort.Type == intstr.String {
 		portName := port.TargetPort.StrVal
 		for ci := range cns {
 			cn := &cns[ci]
 			for pi := range cn.Ports {
-				if cn.Ports[pi].Name == portName {
+				p := &cn.Ports[pi]
+				if p.Name == portName && protoEqual(p.Protocol) {
 					return cn, pi
 				}
 			}
@@ -113,11 +124,14 @@ func findContainerMatchingPort(port *core.ServicePort, cns []core.Container) (*c
 		for ci := range cns {
 			cn := &cns[ci]
 			for pi := range cn.Ports {
-				if cn.Ports[pi].ContainerPort == portNum {
+				p := &cn.Ports[pi]
+				if p.ContainerPort == portNum && protoEqual(p.Protocol) {
 					return cn, pi
 				}
 			}
 		}
+		// As a last resort, also consider containers that don't expose their ports at all. Those
+		// containers match all ports because it's unknown what they might be listening to.
 		for ci := range cns {
 			cn := &cns[ci]
 			if len(cn.Ports) == 0 {
