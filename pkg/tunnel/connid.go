@@ -12,6 +12,10 @@ import (
 // is suitable as a map key.
 type ConnID string
 
+func ConnIDFromUDP(src, dst *net.UDPAddr) ConnID {
+	return NewConnID(ipproto.UDP, src.IP, dst.IP, uint16(src.Port), uint16(dst.Port))
+}
+
 // NewConnID returns a new ConnID for the given values.
 func NewConnID(proto int, src, dst net.IP, srcPort, dstPort uint16) ConnID {
 	src4 := src.To4()

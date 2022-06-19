@@ -241,7 +241,7 @@ func Test_server_intercepts(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := dlog.WithLogger(context.Background(), log.NewTestLogger(t, dlog.LogLevelWarn))
-			c, cancel := context.WithCancel(dlog.NewTestContext(t, false))
+			c, cancel := context.WithCancel(c)
 			ln, err := net.Listen("tcp", ":0")
 			require.NoError(t, err)
 			wg := sync.WaitGroup{}

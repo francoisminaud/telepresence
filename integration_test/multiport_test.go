@@ -17,15 +17,15 @@ func (s *connectedSuite) Test_MultipleUnnamedServicePorts() {
 	ctx := s.Context()
 	dep := "echo-double-one-unnamed"
 	s.ApplyTestApp(ctx, dep, "deploy/"+dep)
-	defer s.Kubectl(ctx, "delete", "deploy", dep)
+	defer s.KubectlOk(ctx, "delete", "deploy", dep)
 
 	require := s.Require()
 	require.NoError(s.Kubectl(ctx, "expose", "deploy", dep, "--port", "80", "--target-port", "8080", "--name", dep+"-"+"80"))
-	defer s.Kubectl(ctx, "delete", "svc", dep+"-"+"80")
+	defer s.KubectlOk(ctx, "delete", "svc", dep+"-"+"80")
 	require.NoError(s.Kubectl(ctx, "expose", "deploy", dep, "--port", "81", "--target-port", "8081", "--name", dep+"-"+"81"))
-	defer s.Kubectl(ctx, "delete", "svc", dep+"-"+"81")
+	defer s.KubectlOk(ctx, "delete", "svc", dep+"-"+"81")
 	require.NoError(s.Kubectl(ctx, "expose", "deploy", dep, "--port", "82", "--target-port", "8082", "--name", dep+"-"+"82"))
-	defer s.Kubectl(ctx, "delete", "svc", dep+"-"+"82")
+	defer s.KubectlOk(ctx, "delete", "svc", dep+"-"+"82")
 
 	portTest := func(svcPort, targetPort string) {
 		ctx := s.Context()
@@ -63,12 +63,12 @@ func (s *connectedSuite) Test_NoContainerPort() {
 	ctx := s.Context()
 	dep := "echo-no-containerport"
 	s.ApplyTestApp(ctx, dep, "deploy/"+dep)
-	defer s.Kubectl(ctx, "delete", "deploy", dep)
+	defer s.KubectlOk(ctx, "delete", "deploy", dep)
 	require := s.Require()
 	require.NoError(s.Kubectl(ctx, "expose", "deploy", dep, "--port", "80", "--target-port", "8080", "--name", dep+"-"+"80"))
-	defer s.Kubectl(ctx, "delete", "svc", dep+"-"+"80")
+	defer s.KubectlOk(ctx, "delete", "svc", dep+"-"+"80")
 	require.NoError(s.Kubectl(ctx, "expose", "deploy", dep, "--port", "81", "--target-port", "8081", "--name", dep+"-"+"81"))
-	defer s.Kubectl(ctx, "delete", "svc", dep+"-"+"81")
+	defer s.KubectlOk(ctx, "delete", "svc", dep+"-"+"81")
 
 	portTest := func(svcPort, targetPort string) {
 		ctx := s.Context()
@@ -92,13 +92,13 @@ func (s *connectedSuite) Test_UnnamedUdpAndTcpPort() {
 	ctx := s.Context()
 	dep := "echo-udp-tcp-unnamed"
 	s.ApplyTestApp(ctx, dep, "deploy/"+dep)
-	defer s.Kubectl(ctx, "delete", "deploy", dep)
+	defer s.KubectlOk(ctx, "delete", "deploy", dep)
 
 	require := s.Require()
 	require.NoError(s.Kubectl(ctx, "expose", "deploy", dep, "--port", "80", "--protocol", "UDP", "--target-port", "8080", "--name", "echo-udp"))
-	defer s.Kubectl(ctx, "delete", "svc", "echo-udp")
+	defer s.KubectlOk(ctx, "delete", "svc", "echo-udp")
 	require.NoError(s.Kubectl(ctx, "expose", "deploy", dep, "--port", "80", "--protocol", "TCP", "--target-port", "8080", "--name", "echo-tcp"))
-	defer s.Kubectl(ctx, "delete", "svc", "echo-tcp")
+	defer s.KubectlOk(ctx, "delete", "svc", "echo-tcp")
 
 	svcPort := "80"
 	s.Run("TCP port 80", func() {

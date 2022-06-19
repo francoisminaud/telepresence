@@ -176,7 +176,7 @@ func Main(ctx context.Context, args ...string) error {
 			// Group the containers intercepts by agent port
 			icStates := make(map[agentconfig.PortAndProto][]*agentconfig.Intercept, len(cn.Intercepts))
 			for _, ic := range cn.Intercepts {
-				k := agentconfig.PortAndProto{ic.AgentPort, ic.Protocol}
+				k := agentconfig.PortAndProto{Port: ic.AgentPort, Proto: ic.Protocol}
 				icStates[k] = append(icStates[k], ic)
 			}
 
